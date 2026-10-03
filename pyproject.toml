@@ -1,0 +1,15 @@
+[project]
+name = "prediction-copy-bot"
+version = "0.1.0"
+description = "Finds profitable Polymarket wallets and backtests copying them"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+copybot = "copybot.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
