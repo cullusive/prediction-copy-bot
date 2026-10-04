@@ -410,11 +410,16 @@ class PaperEngine:
 
     def run(self, stop: Callable[[], bool] = lambda: False) -> None:
         last_settle = 0
+        self._set_meta("mode", self.cfg.mode)
+        self._set_meta("bankroll", self.cfg.bankroll)
+        self._set_meta("watching", json.dumps(sorted(self.leaders)))
+        self._set_meta("started", self.now())
         self.notify.send(f"Paper trading started in {self.cfg.mode} mode, "
                          f"watching {len(self.leaders)} wallets.")
         while not stop():
             started = time.monotonic()
             self.poll_once()
+            self._set_meta("last_poll", self.now())
             self.expire_pending()
             if self.now() - last_settle >= self.cfg.settle_every:
                 self.settle()
