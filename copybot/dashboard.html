@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copy Bot Dashboard</title>
+<style>
+:root {
+  --bg: #f4f4f2; --surface: #fcfcfb; --border: #e3e2dd;
+  --text: #0b0b0b; --text-2: #52514e; --muted: #8a8984;
+  --series: #2a78d6; --series-fill: rgba(42,120,214,.10);
+  --good: #0ca30c; --good-text: #006300; --warning: #fab219; --critical: #d92d20; --critical-text: #b42318;
+  --btn: #0b0b0b; --btn-text: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111110; --surface: #1a1a19; --border: #2c2c2a;
+    --text: #fff; --text-2: #c3c2b7; --muted: #8f8e86;
+    --series: #3987e5; --series-fill: rgba(57,135,229,.16);
+    --good-text: #4cc94c; --critical-text: #ff7b6e; --btn: #fff; --btn-text: #0b0b0b;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 48px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; flex: 1; }
+h2 { font-size: 15px; margin: 0 0 10px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-2); font-size: 13px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.on { background: var(--good); }
+button { font: inherit; border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+button.primary { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
+button:disabled { opacity: .5; cursor: default; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.tile .label { color: var(--text-2); font-size: 13px; }
+.tile .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .sub { color: var(--muted); font-size: 12px; }
+.pos { color: var(--good-text); } .neg { color: var(--critical-text); }
+.grid2 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px; }
+@media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+#chart { position: relative; height: 220px; }
+#chart svg { width: 100%; height: 100%; display: block; }
+.tip { position: absolute; pointer-events: none; background: var(--text); color: var(--surface);
+  padding: 6px 8px; border-radius: 6px; font-size: 12px; white-space: nowrap; display: none; }
+.empty { color: var(--muted); padding: 24px 0; text-align: center; }
+.approval { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.approval .title { font-weight: 600; }
+.approval ul { margin: 6px 0; padding-left: 18px; color: var(--text-2); }
+.approval .flag { color: var(--text); }
+.approval .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.approval .row .muted { margin-left: auto; }
+.muted { color: var(--muted); font-size: 12px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; }
+.tabs button[aria-selected="true"] { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--text-2); font-weight: 500; font-size: 12px; }
+td.num, th.num { text-align: right; }
+td.wrap { white-space: normal; min-width: 220px; }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); }
+.badge::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--muted); }
+.badge.executed::before { background: var(--good); }
+.badge.pending::before { background: var(--warning); }
+.badge.blocked::before, .badge.rejected::before { background: var(--critical); }
+code { font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Copy Bot</h1>
+    <span class="pill"><span id="dot" class="dot"></span><span id="runtext">Loading…</span></span>
+    <span class="pill" id="mode">–</span>
+    <button id="pausebtn">Pause trading</button>
+  </header>
+
+  <section class="tiles">
+    <div class="card tile"><div class="label">Equity (paper)</div><div class="value" id="t-equity">–</div><div class="sub" id="t-equity-sub"></div></div>
+    <div class="card tile"><div class="label">Realized P&amp;L</div><div class="value" id="t-pnl">–</div><div class="sub" id="t-pnl-sub"></div></div>
+    <div class="card tile"><div class="label">Open positions</div><div class="value" id="t-open">–</div><div class="sub" id="t-open-sub"></div></div>
+    <div class="card tile"><div class="label">Win rate</div><div class="value" id="t-win">–</div><div class="sub" id="t-win-sub"></div></div>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>Equity over time</h2>
+      <div id="chart"><div class="tip" id="tip"></div></div>
+    </div>
+    <div class="card">
+      <h2>Needs your approval</h2>
+      <div id="approvals"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="signals" aria-selected="true">Trade signals</button>
+      <button role="tab" data-tab="open">Open positions</button>
+      <button role="tab" data-tab="closed">Closed trades</button>
+      <button role="tab" data-tab="leaders">Watched wallets</button>
+    </div>
+    <div class="tablewrap" id="table"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money = (v) => (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const signed = (v) => (v > 0 ? "+" : "") + money(v);
+const pct = (v) => v == null ? "–" : (v * 100).toFixed(1) + "%";
+const ago = (ts, now) => { if (!ts) return "never"; const s = now - ts;
+  return s < 60 ? s + "s ago" : s < 3600 ? Math.floor(s/60) + "m ago" : s < 86400 ? Math.floor(s/3600) + "h ago" : Math.floor(s/86400) + "d ago"; };
+const when = (ts) => ts ? new Date(ts * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "–";
+const short = (w) => w ? w.slice(0, 6) + "…" + w.slice(-4) : "";
+const tone = (v) => v > 0 ? "pos" : v < 0 ? "neg" : "";
+
+let state = null, tab = "signals";
+
+async function post(path) {
+  const r = await fetch(path, {method: "POST", headers: {"X-Copybot": "1"}});
+  const j = await r.json(); await refresh(); return j;
+}
+
+function renderHeader(s) {
+  $("dot").className = "dot" + (s.running ? " on" : "");
+  $("runtext").textContent = s.running ? `Running · checked ${ago(s.last_poll, s.now)}`
+    : (s.last_poll ? `Stopped · last check ${ago(s.last_poll, s.now)}` : "Not started");
+  const paused = s.status.paused;
+  $("mode").textContent = (s.status.mode === "approval" ? "Approval mode" : "Automatic mode") + (paused ? " · paused" : "");
+  $("pausebtn").textContent = paused === "paused by you" ? "Resume trading" : "Pause trading";
+  $("pausebtn").onclick = () => post(paused === "paused by you" ? "/api/resume" : "/api/pause");
+}
+
+function renderTiles(s) {
+  const st = s.status, pnl = st.realized_pnl;
+  $("t-equity").textContent = money(st.equity);
+  $("t-equity-sub").textContent = `started with ${money(s.bankroll)}`;
+  $("t-pnl").textContent = signed(pnl); $("t-pnl").className = "value " + tone(pnl);
+  $("t-pnl-sub").textContent = `${(pnl / s.bankroll * 100).toFixed(2)}% of bankroll`;
+  $("t-open").textContent = st.open_positions;
+  $("t-open-sub").textContent = `${money(st.open_exposure)} at risk`;
+  $("t-win").textContent = st.win_rate == null ? "–" : pct(st.win_rate);
+  $("t-win-sub").textContent = `${st.closed_trades} closed trades`;
+}
+
+function renderChart(points) {
+  const box = $("chart"), tip = $("tip");
+  box.querySelectorAll("svg, .empty").forEach(n => n.remove());
+  if (points.length < 2) {
+    box.insertAdjacentHTML("afterbegin", `<div class="empty">The line appears once trades start closing.</div>`);
+    return;
+  }
+  const W = box.clientWidth, H = box.clientHeight, L = 68, R = 12, T = 10, B = 24;
+  const xs = points.map(p => p.ts), ys = points.map(p => p.equity);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys); const pad = Math.max((y1 - y0) * 0.1, 1); y0 -= pad; y1 += pad;
+  const x = t => L + (t - xs[0]) / Math.max(xs.at(-1) - xs[0], 1) * (W - L - R);
+  const y = v => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  const ticks = [y0 + pad, (y0 + y1) / 2, y1 - pad];
+  const line = points.map((p, i) => (i ? "L" : "M") + x(p.ts).toFixed(1) + "," + y(p.equity).toFixed(1)).join("");
+  const area = line + `L${x(xs.at(-1))},${H - B}L${x(xs[0])},${H - B}Z`;
+  const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Paper equity over time">
+    ${ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)"/>
+      <text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${"$" + Math.round(v).toLocaleString()}</text>`).join("")}
+    <text x="${L}" y="${H - 6}" font-size="11" fill="var(--muted)">${when(xs[0])}</text>
+    <text x="${W - R}" y="${H - 6}" text-anchor="end" font-size="11" fill="var(--muted)">${when(xs.at(-1))}</text>
+    <path d="${area}" fill="var(--series-fill)"/>
+    <path d="${line}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round"/>
+    <line id="xh" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-dasharray="3 3" visibility="hidden"/>
+    <circle id="xp" r="4" fill="var(--series)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>
+    <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" id="hit"/>
+  </svg>`;
+  box.insertAdjacentHTML("afterbegin", svg);
+  const hit = box.querySelector("#hit"), xh = box.querySelector("#xh"), xp = box.querySelector("#xp");
+  hit.addEventListener("mousemove", (e) => {
+    const mx = e.offsetX; let best = 0;
+    points.forEach((p, i) => { if (Math.abs(x(p.ts) - mx) < Math.abs(x(points[best].ts) - mx)) best = i; });
+    const p = points[best], px = x(p.ts), py = y(p.equity);
+    xh.setAttribute("x1", px); xh.setAttribute("x2", px); xh.setAttribute("visibility", "visible");
+    xp.setAttribute("cx", px); xp.setAttribute("cy", py); xp.setAttribute("visibility", "visible");
+    tip.innerHTML = `<b>${money(p.equity)}</b> · ${when(p.ts)}` + (p.title ? `<br>${esc(p.title).slice(0, 60)}: ${signed(p.pnl)}` : "");
+    tip.style.display = "block";
+    tip.style.left = Math.min(px + 10, W - tip.offsetWidth - 4) + "px"; tip.style.top = Math.max(py - 40, 0) + "px";
+  });
+  hit.addEventListener("mouseleave", () => { tip.style.display = "none"; xh.setAttribute("visibility", "hidden"); xp.setAttribute("visibility", "hidden"); });
+}
+
+function renderApprovals(list) {
+  const box = $("approvals");
+  if (!list.length) { box.innerHTML = `<div class="empty">Nothing waiting. Questionable trades show up here.</div>`; return; }
+  box.innerHTML = list.map(s => `
+    <div class="approval">
+      <div class="title">${esc(s.title || "Unknown market")}</div>
+      <div class="muted">${short(s.leader)} bought ${money(s.leader_usdc)} at ${s.leader_price.toFixed(3)} · we'd pay ${s.our_price?.toFixed(3) ?? "–"} · score ${Math.round(s.score)}</div>
+      <ul>${s.reasons.slice(0, 4).map(r => `<li>${esc(r)}</li>`).join("")}
+        ${s.red_flags.map(f => `<li class="flag">⚠ ${esc(f)}</li>`).join("")}</ul>
+      <div class="row">
+        <button class="primary" data-approve="${s.id}">Approve</button>
+        <button data-reject="${s.id}">Reject</button>
+        <span class="muted">expires in ${Math.floor(s.expires_in / 60)}:${String(s.expires_in % 60).padStart(2, "0")}</span>
+      </div>
+    </div>`).join("");
+  box.querySelectorAll("[data-approve]").forEach(b => b.onclick = async () => { b.disabled = true; const r = await post(`/api/approve/${b.dataset.approve}`); if (r.result !== "executed") alert(r.result || r.error); });
+  box.querySelectorAll("[data-reject]").forEach(b => b.onclick = () => { b.disabled = true; post(`/api/reject/${b.dataset.reject}`); });
+}
+
+function table(cols, rows, empty) {
+  if (!rows.length) return `<div class="empty">${empty}</div>`;
+  return `<table><thead><tr>${cols.map(c => `<th class="${c.cls || ""}">${c.h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${cols.map(c => `<td class="${c.cls || ""}">${c.f(r)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+function renderTable(s) {
+  const views = {
+    signals: () => table([
+      {h: "Time", f: r => when(r.ts)},
+      {h: "Market", cls: "wrap", f: r => esc(r.title)},
+      {h: "Wallet", f: r => `<code>${short(r.leader)}</code>`},
+      {h: "Leader paid", cls: "num", f: r => r.leader_price.toFixed(3)},
+      {h: "Our price", cls: "num", f: r => r.our_price == null ? "–" : r.our_price.toFixed(3)},
+      {h: "Score", cls: "num", f: r => Math.round(r.score)},
+      {h: "Outcome", f: r => `<span class="badge ${r.status}">${r.status}</span>`},
+      {h: "Why", cls: "wrap", f: r => esc(r.note || [...r.red_flags, ...r.reasons][0] || "")},
+    ], s.signals, "No trades from watched wallets yet."),
+    open: () => table([
+      {h: "Opened", f: r => when(r.opened_ts)},
+      {h: "Market", cls: "wrap", f: r => esc(r.title)},
+      {h: "Copying", f: r => `<code>${short(r.leader)}</code>`},
+      {h: "Shares", cls: "num", f: r => r.shares.toFixed(2)},
+      {h: "Entry", cls: "num", f: r => r.entry.toFixed(3)},
+      {h: "Cost", cls: "num", f: r => money(r.cost)},
+    ], s.open_positions, "No open positions."),
+    closed: () => table([
+      {h: "Closed", f: r => when(r.closed_ts)},
+      {h: "Market", cls: "wrap", f: r => esc(r.title)},
+      {h: "Copying", f: r => `<code>${short(r.leader)}</code>`},
+      {h: "Cost", cls: "num", f: r => money(r.cost)},
+      {h: "Returned", cls: "num", f: r => money(r.proceeds)},
+      {h: "P&L", cls: "num", f: r => `<span class="${tone(r.pnl)}">${signed(r.pnl)}</span>`},
+    ], s.closed_positions, "No closed trades yet."),
+    leaders: () => table([
+      {h: "Wallet", f: r => `<code>${short(r.wallet)}</code> ${esc(r.name || "")}`},
+      {h: "Proven", f: r => r.eligible ? "Yes" : "Not yet (asks first)"},
+      {h: "Backtest copy edge", cls: "num", f: r => pct(r.copy_roi_60s)},
+      {h: "Markets", cls: "num", f: r => r.markets ?? "–"},
+      {h: "Their last trade", f: r => ago(r.last_trade, s.now)},
+      {h: "Our trades", cls: "num", f: r => r.our_trades},
+      {h: "Our P&L", cls: "num", f: r => `<span class="${tone(r.our_pnl)}">${signed(r.our_pnl)}</span>`},
+    ], s.leaders, "Start paper trading to see the watched wallets."),
+  };
+  $("table").innerHTML = views[tab]();
+}
+
+document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll("[data-tab]").forEach(x => x.setAttribute("aria-selected", x === b));
+  if (state) renderTable(state);
+});
+
+async function refresh() {
+  try {
+    state = await (await fetch("/api/state")).json();
+    renderHeader(state); renderTiles(state); renderChart(state.equity);
+    renderApprovals(state.pending); renderTable(state);
+  } catch (e) {
+    $("dot").className = "dot"; $("runtext").textContent = "Dashboard can't reach the bot";
+  }
+}
+refresh();
+setInterval(refresh, 5000);
+window.addEventListener("resize", () => state && renderChart(state.equity));
+</script>
+</body>
+</html>

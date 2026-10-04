@@ -127,6 +127,22 @@ def cmd_paper(args, store: Store) -> None:
         print(f"{args.action}d")
 
 
+def cmd_dashboard(args, store: Store) -> None:
+    from .clob import fetch_book
+    from .dashboard import serve
+    from .notify import from_env
+    from .paper import SCHEMA as PAPER_SCHEMA, PaperConfig, PaperEngine
+
+    def engine_factory(st: Store) -> PaperEngine:
+        meta = dict(st.conn.execute("SELECT key, value FROM paper_meta").fetchall())
+        cfg = PaperConfig(mode=meta.get("mode", "auto"),
+                          bankroll=float(meta.get("bankroll", 1000)))
+        return PaperEngine(st, DataApi(), fetch_book, {}, cfg, notifier=from_env())
+
+    store.conn.executescript(PAPER_SCHEMA)
+    serve(args.db, engine_factory, args.port)
+
+
 def cmd_score(args, store: Store) -> None:
     cfg = ScoringConfig(min_markets=args.min_markets)
     fills, resolutions, series = _load(store)
@@ -213,6 +229,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="also watch this many pre-screened wallets (their trades always ask first)")
     pp.add_argument("--min-markets", type=int, default=30)
 
+    db_ = sub.add_parser("dashboard", help="live dashboard at http://localhost:8765")
+    db_.add_argument("--port", type=int, default=8765)
+
     w = sub.add_parser("walkforward", help="out-of-sample go/no-go test")
     w.add_argument("--split", required=True, help="YYYY-MM-DD; select before, test after")
     w.add_argument("--top", type=int, default=20)
@@ -224,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     store = Store(args.db)
     try:
         {"discover": cmd_discover, "backfill": cmd_backfill, "score": cmd_score,
-         "report": cmd_report, "prices": cmd_prices, "collect": cmd_collect, "paper": cmd_paper, "walkforward": cmd_walkforward}[args.cmd](args, store)
+         "report": cmd_report, "prices": cmd_prices, "collect": cmd_collect, "paper": cmd_paper, "dashboard": cmd_dashboard, "walkforward": cmd_walkforward}[args.cmd](args, store)
     finally:
         store.close()
     return 0
