@@ -34,7 +34,8 @@ def cmd_discover(args, store: Store) -> None:
 
 def cmd_backfill(args, store: Store) -> None:
     c = Collector(DataApi(), store)
-    c.backfill_all(max_fills=args.max_fills)
+    since = int(time.time()) - args.since_days * 86400 if args.since_days else None
+    c.backfill_all(max_fills=args.max_fills, max_wallets=args.max_wallets, since=since)
     print(f"resolved markets found: {c.refresh_resolutions()}")
     if not args.skip_prices:
         c.fetch_prices()
@@ -90,6 +91,10 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("backfill", help="download fills, resolutions and prices")
     b.add_argument("--max-fills", type=int, default=50_000)
     b.add_argument("--skip-prices", action="store_true")
+    b.add_argument("--max-wallets", type=int, default=None,
+                   help="backfill only this many candidates, multi-source first")
+    b.add_argument("--since-days", type=int, default=None,
+                   help="first fetch starts this many days ago instead of the beginning")
 
     for name, help_ in (("score", "score all wallets"), ("report", "show top wallets")):
         s = sub.add_parser(name, help=help_)
