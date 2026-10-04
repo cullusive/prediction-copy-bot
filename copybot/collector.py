@@ -106,6 +106,14 @@ def _epoch(v: Any) -> int | None:
     return int(datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp())
 
 
+def is_standard_condition(cond: str) -> bool:
+    """CTF condition ids are 32 bytes. Combo markets ("A AND B AND C") show up
+    in activity with short zero-padded ids that /resolutions rejects."""
+    return (len(cond) == 66 and cond.startswith("0x")
+            and all(c in "0123456789abcdef" for c in cond[2:].lower())
+            and not cond.endswith("0" * 28))
+
+
 def iter_holders(groups: Iterable[dict]) -> Iterator[dict]:
     """v2 /holders returns one group per token: {"token_id", "holders": [...]}."""
     for g in groups:
@@ -231,7 +239,13 @@ class Collector:
         """Batches of 20 (the API maximum), fetched on a few threads since a
         few hundred thousand conditions is normal after a wide backfill."""
         now = int(time.time())
-        ids = self.store.unresolved_condition_ids()
+        ids = []
+        for cond in self.store.unresolved_condition_ids():
+            if is_standard_condition(cond):
+                ids.append(cond)
+            else:  # combo/parlay ids; /resolutions rejects them and fails the batch
+                self.store.set_resolution(cond, None, None, now, commit=False)
+        self.store.conn.commit()
         batches = [ids[i:i + 20] for i in range(0, len(ids), 20)]
         apis = [DataApi(self.api.base_url) for _ in range(workers)]
 

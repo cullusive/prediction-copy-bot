@@ -90,3 +90,9 @@ def test_parse_resolution_payouts_shape_with_iso_time():
             "last_update_timestamp": "2026-07-13T19:43:11Z",
             "resolved_at": "2026-07-13T19:43:11Z"}
     assert parse_resolution(item) == ("0xc", [1.0, 0.0], 1783971791)
+
+
+def test_combo_condition_ids_are_not_standard():
+    from copybot.collector import is_standard_condition
+    assert is_standard_condition("0x876506d8b2bd7a0d3fa4fe18c024eee6e1dd81ee24c26795dadd6cfe4a7b5d0d")
+    assert not is_standard_condition("0x0300001d85ab16a84211d5157f1ad293110000000000000000000000000000")
