@@ -10,11 +10,11 @@ param(
 $repo = Split-Path -Parent $PSScriptRoot
 $log = Join-Path $repo "collect.log"
 $action = New-ScheduledTaskAction -Execute "cmd.exe" `
-    -Argument "/c `"$Python`" -m copybot collect -v >> `"$log`" 2>&1" `
+    -Argument "/c `"`"$Python`" -m copybot -v collect >> `"$log`" 2>&1`"" `
     -WorkingDirectory $repo
 $trigger = New-ScheduledTaskTrigger -Daily -At $Time
 # StartWhenAvailable: if the PC was off at $Time, run as soon as it's back on.
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Hours 6)
 Register-ScheduledTask -TaskName "copybot-collect" -Action $action `
     -Trigger $trigger -Settings $settings -Force | Out-Null
