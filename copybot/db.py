@@ -136,7 +136,7 @@ class Store:
     # resolutions ---------------------------------------------------------
 
     def set_resolution(self, condition_id: str, payouts: list[float] | None,
-                       resolved_at: int | None, now: int) -> None:
+                       resolved_at: int | None, now: int, commit: bool = True) -> None:
         self.conn.execute(
             """INSERT INTO resolutions(condition_id, payouts, resolved_at, checked_at)
                VALUES (?,?,?,?)
@@ -145,7 +145,8 @@ class Store:
                  checked_at=excluded.checked_at""",
             (condition_id, json.dumps(payouts) if payouts is not None else None,
              resolved_at, now))
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def resolutions(self) -> dict[str, tuple[list[float], int | None]]:
         out = {}

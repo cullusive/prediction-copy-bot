@@ -82,3 +82,11 @@ def test_buckets_for_age():
     assert buckets_for(100 * day, 101 * day) == [60, 300, 1800]
     assert buckets_for(100 * day, 130 * day) == [300, 1800]
     assert buckets_for(0, 200 * day) == [1800]
+
+
+def test_parse_resolution_payouts_shape_with_iso_time():
+    # second live shape (older markets): raw payout numerators and ISO times
+    item = {"condition_id": "0xc", "status": "resolved", "payouts": [1000000, 0],
+            "last_update_timestamp": "2026-07-13T19:43:11Z",
+            "resolved_at": "2026-07-13T19:43:11Z"}
+    assert parse_resolution(item) == ("0xc", [1.0, 0.0], 1783971791)

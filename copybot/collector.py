@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from typing import Any, Iterable, Iterator
 
 from .data_api import DataApi
@@ -92,7 +94,16 @@ def parse_resolution(item: dict) -> tuple[str | None, list[float] | None, int | 
     status = str(item.get("status") or item.get("state") or "").lower()
     if status and status not in ("resolved", "settled", "finalized"):
         payouts = None
-    return cond, payouts, int(resolved_at) if resolved_at else None
+    return cond, payouts, _epoch(resolved_at)
+
+
+def _epoch(v: Any) -> int | None:
+    """Unix seconds from an int, a digit string, or an ISO-8601 string."""
+    if v in (None, ""):
+        return None
+    if isinstance(v, (int, float)) or str(v).isdigit():
+        return int(v)
+    return int(datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp())
 
 
 def iter_holders(groups: Iterable[dict]) -> Iterator[dict]:
@@ -216,26 +227,39 @@ class Collector:
             except Exception as exc:
                 log.warning("backfill %s failed: %s", w["address"], exc)
 
-    def refresh_resolutions(self) -> int:
+    def refresh_resolutions(self, workers: int = 4) -> int:
+        """Batches of 20 (the API maximum), fetched on a few threads since a
+        few hundred thousand conditions is normal after a wide backfill."""
         now = int(time.time())
         ids = self.store.unresolved_condition_ids()
-        resolved = 0
-        for i in range(0, len(ids), 20):
-            batch = ids[i:i + 20]
+        batches = [ids[i:i + 20] for i in range(0, len(ids), 20)]
+        apis = [DataApi(self.api.base_url) for _ in range(workers)]
+
+        def fetch(job: tuple[int, list[str]]) -> tuple[list[str], list[dict] | None]:
+            n, batch = job
             try:
-                items = self.api.resolutions(batch)
+                return batch, apis[n % workers].resolutions(batch)
             except Exception as exc:
                 log.warning("resolutions batch failed: %s", exc)
-                continue
-            seen = set()
-            for item in items:
-                cond, payouts, at = parse_resolution(item)
-                if cond:
-                    seen.add(cond)
-                    self.store.set_resolution(cond, payouts, at, now)
-                    resolved += payouts is not None
-            for cond in set(batch) - seen:
-                self.store.set_resolution(cond, None, None, now)
+                return batch, None
+
+        resolved = 0
+        with ThreadPoolExecutor(workers) as pool:
+            for n, (batch, items) in enumerate(pool.map(fetch, enumerate(batches)), 1):
+                if items is None:
+                    continue
+                seen = set()
+                for item in items:
+                    cond, payouts, at = parse_resolution(item)
+                    if cond:
+                        seen.add(cond)
+                        self.store.set_resolution(cond, payouts, at, now, commit=False)
+                        resolved += payouts is not None
+                for cond in set(batch) - seen:
+                    self.store.set_resolution(cond, None, None, now, commit=False)
+                self.store.conn.commit()
+                if n % 500 == 0:
+                    log.info("resolutions: %d/%d batches, %d resolved", n, len(batches), resolved)
         return resolved
 
     def fetch_prices(self, tokens: Iterable[str] | None = None) -> None:
