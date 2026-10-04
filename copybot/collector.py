@@ -104,9 +104,16 @@ def iter_holders(groups: Iterable[dict]) -> Iterator[dict]:
             yield g
 
 
-PRICE_BUCKETS = (60, 300, 1800)   # finest first; 60s is kept ~9 days, 300s ~2 months
+# (bucket seconds, approx. retention seconds) observed on the live API, 2026-10.
+# 60s is kept ~9 days, 300s ~2 months; 1800s goes back further but not to January.
+PRICE_BUCKETS = ((60, 9 * 86400), (300, 65 * 86400), (1800, None))
 PRICE_WINDOW_MAX = 15 * 86400     # API limit on end - start
 PRICE_PAD = 1800                  # fetch this long after each fill (delays + lag)
+
+
+def buckets_for(start: int, now: int) -> list[int]:
+    """Buckets worth asking for, finest first, given how old the window is."""
+    return [b for b, keep in PRICE_BUCKETS if keep is None or now - start <= keep]
 
 
 def price_windows(fill_ts: Iterable[int], pad: int = PRICE_PAD,
@@ -231,17 +238,21 @@ class Collector:
                 self.store.set_resolution(cond, None, None, now)
         return resolved
 
-    def fetch_prices(self) -> None:
+    def fetch_prices(self, tokens: Iterable[str] | None = None) -> None:
         """Finest available price history around each token's fills, used to
         replay delayed copies. The API caps a request at 15 days and keeps
         fine buckets only for recent data, so we try 60s, then 300s, then 1800s."""
+        now = int(time.time())
         fill_ts = self.store.fill_times_by_token()
+        if tokens is not None:
+            wanted = set(tokens)
+            fill_ts = {t: v for t, v in fill_ts.items() if t in wanted}
         for i, (token, times) in enumerate(fill_ts.items(), 1):
             if self.store.has_prices(token):
                 continue
             pts: list[tuple[int, float]] = []
             for start, end in price_windows(times):
-                for bucket in PRICE_BUCKETS:
+                for bucket in buckets_for(start, now):
                     try:
                         got = self.api.price_history(token, start=start, end=end,
                                                      bucket_seconds=bucket)

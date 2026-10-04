@@ -74,3 +74,11 @@ def test_wallets_limit_prefers_multi_source(tmp_path):
     s.add_wallet("0x3", "winners", 1)
     assert [w["address"] for w in s.wallets(2)] == ["0x2", "0x3"]
     assert len(s.wallets()) == 3
+
+
+def test_buckets_for_age():
+    from copybot.collector import buckets_for
+    day = 86400
+    assert buckets_for(100 * day, 101 * day) == [60, 300, 1800]
+    assert buckets_for(100 * day, 130 * day) == [300, 1800]
+    assert buckets_for(0, 200 * day) == [1800]
