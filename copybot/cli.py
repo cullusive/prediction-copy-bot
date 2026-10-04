@@ -98,6 +98,16 @@ def cmd_collect(args, store: Store) -> None:
     print("collect done")
 
 
+def drop_wallets(store: Store, wallets: list[str], exclude: list[str]) -> list[str]:
+    """Remove wallets named by address or leaderboard name (case-insensitive)."""
+    skip = {x.lower() for x in exclude}
+    if not skip:
+        return wallets
+    names = {r["address"]: (r["name"] or "").lower()
+             for r in store.conn.execute("SELECT address, name FROM wallets")}
+    return [w for w in wallets if w.lower() not in skip and names.get(w.lower()) not in skip]
+
+
 def cmd_paper(args, store: Store) -> None:
     from .clob import fetch_book
     from .notify import from_env
@@ -106,6 +116,7 @@ def cmd_paper(args, store: Store) -> None:
     cfg = PaperConfig(mode=args.mode, bankroll=args.bankroll)
     if args.action == "run":
         wallets = watchlist(store, args.top, ScoringConfig(min_markets=args.min_markets))
+        wallets = drop_wallets(store, wallets, args.exclude)
         leaders = load_leaders(store, wallets)
     else:
         leaders = {}
@@ -228,6 +239,8 @@ def main(argv: list[str] | None = None) -> int:
     pp.add_argument("--top", type=int, default=20,
                     help="also watch this many pre-screened wallets (their trades always ask first)")
     pp.add_argument("--min-markets", type=int, default=30)
+    pp.add_argument("--exclude", nargs="+", default=[], metavar="WALLET",
+                    help="don't copy these wallets (address or leaderboard name)")
 
     db_ = sub.add_parser("dashboard", help="live dashboard at http://localhost:8765")
     db_.add_argument("--port", type=int, default=8765)
