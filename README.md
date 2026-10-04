@@ -42,3 +42,7 @@ Every leader buy gets a 0-100 score built from: the leader's backtested copy edg
 - `python -m copybot paper status` shows equity, PnL, win rate and signal counts.
 
 Alerts go to Discord if `COPYBOT_DISCORD_WEBHOOK` is set to a channel webhook URL, and to the console otherwise. Keep the webhook URL out of the repo.
+
+## Live dashboard
+
+Run `python -m copybot dashboard` in a second window while `paper run` is going, then open http://localhost:8765. It shows equity over time, P&L, open and closed positions, every trade signal with its score and reasons, the watched wallets, and any trades waiting for approval with Approve/Reject buttons and a countdown. The Pause button stops new trades. The page refreshes every 5 seconds and only listens on this computer.
