@@ -93,3 +93,30 @@ def test_walk_forward_uses_only_past_data():
     assert out.wallets == ["0xgood"]
     assert out.n_lots == 15
     assert out.copy_roi > 0
+
+
+def test_walk_forward_whale_does_not_dominate_fixed_stake():
+    def wallet(prefix, n, size, win):
+        fills, res, ser = [], {}, {}
+        for i in range(n):
+            t0 = i * DAY
+            tok, cond = f"{prefix}t{i}", f"{prefix}c{i}"
+            fills.append(fill(t0, "BUY", 0.40, size, tok, cond))
+            res[cond] = ([1.0, 0.0] if (i % 3 if win else i % 3 == 0) else [0.0, 1.0], t0 + DAY // 2)
+            ser[tok] = [(t0, 0.40), (t0 + 60, 0.45)]
+        return fills, res, ser
+
+    small, rs, ss = wallet("s", 60, 10, True)
+    whale, rw, sw = wallet("w", 60, 100_000, True)
+    # the whale loses after the split, the small wallet keeps winning
+    for cond in list(rw):
+        i = int(cond[2:])
+        if i >= 45:
+            rw[cond] = ([0.0, 1.0], rw[cond][1])
+    look = make_price_lookup({**ss, **sw})
+    out = walk_forward({"0xsmall": small, "0xwhale": whale}, {**rs, **rw}, look,
+                       split_ts=45 * DAY, top_k=5)
+    assert set(out.wallets) == {"0xsmall", "0xwhale"}
+    assert out.copy_roi < 0                       # leader-size weighting: whale swamps it
+    assert out.per_wallet["0xsmall"].mean_r > 0
+    assert out.wallet_equal_roi > out.copy_roi

@@ -127,9 +127,15 @@ class Store:
     def token_ids(self) -> list[str]:
         return [r[0] for r in self.conn.execute("SELECT DISTINCT token_id FROM fills")]
 
-    def fill_times_by_token(self) -> dict[str, list[int]]:
+    def fill_times_by_token(self, since: int | None = None,
+                            wallets: Iterable[str] | None = None) -> dict[str, list[int]]:
+        q, args = "SELECT token_id, ts FROM fills WHERE ts >= ?", [since or 0]
+        if wallets is not None:
+            ws = [w.lower() for w in wallets]
+            q += f" AND wallet IN ({','.join('?' * len(ws))})"
+            args += ws
         out: dict[str, list[int]] = {}
-        for tok, ts in self.conn.execute("SELECT token_id, ts FROM fills ORDER BY ts"):
+        for tok, ts in self.conn.execute(q + " ORDER BY ts", args):
             out.setdefault(tok, []).append(ts)
         return out
 

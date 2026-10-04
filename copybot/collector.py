@@ -223,10 +223,14 @@ class Collector:
         return added
 
     def backfill_all(self, max_fills: int = 50_000, max_wallets: int | None = None,
-                     since: int | None = None) -> None:
+                     since: int | None = None,
+                     only: Iterable[str] | None = None) -> None:
         """`since` bounds the first fetch for wallets not yet backfilled; the
         API returns oldest first, so without it a capped fetch misses recent fills."""
         wallets = self.store.wallets(max_wallets)
+        if only is not None:
+            keep = {w.lower() for w in only}
+            wallets = [w for w in wallets if w["address"] in keep]
         for i, w in enumerate(wallets, 1):
             try:
                 start = w["backfilled_to"] or since
@@ -277,16 +281,20 @@ class Collector:
         return resolved
 
     def fetch_prices(self, tokens: Iterable[str] | None = None,
-                     workers: int = 8) -> None:
+                     workers: int = 8, since: int | None = None,
+                     wallets: Iterable[str] | None = None) -> None:
         """Finest available price history around each token's fills, used to
         replay delayed copies. The API caps a request at 15 days and keeps
         fine buckets only for recent data, so we try 60s, then 300s, then 1800s."""
         now = int(time.time())
-        fill_ts = self.store.fill_times_by_token()
+        fill_ts = self.store.fill_times_by_token(since, wallets)
         if tokens is not None:
             wanted = set(tokens)
             fill_ts = {t: v for t, v in fill_ts.items() if t in wanted}
-        todo = [(t, v) for t, v in fill_ts.items() if not self.store.has_prices(t)]
+        if since is None:
+            todo = [(t, v) for t, v in fill_ts.items() if not self.store.has_prices(t)]
+        else:  # forward collection: new fills on tokens we already have still need prices
+            todo = list(fill_ts.items())
         apis = [DataApi(self.api.base_url) for _ in range(workers)]
 
         def fetch(job: tuple[int, tuple[str, list[int]]]) -> tuple[str, list[tuple[int, float]]]:

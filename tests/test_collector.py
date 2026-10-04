@@ -96,3 +96,16 @@ def test_combo_condition_ids_are_not_standard():
     from copybot.collector import is_standard_condition
     assert is_standard_condition("0x876506d8b2bd7a0d3fa4fe18c024eee6e1dd81ee24c26795dadd6cfe4a7b5d0d")
     assert not is_standard_condition("0x0300001d85ab16a84211d5157f1ad293110000000000000000000000000000")
+
+
+def test_fill_times_since_and_wallets(tmp_path):
+    s = Store(tmp_path / "f.db")
+    rows = []
+    for w, ts in (("0xa", 5), ("0xa", 50), ("0xb", 60)):
+        rows.append(normalize_fill({"proxy_wallet": w, "timestamp": ts, "condition_id": "c",
+                                    "size": 1, "price": 0.5, "token_id": "t", "side": "BUY",
+                                    "transaction_hash": f"h{ts}", "outcome_index": 0}))
+    s.add_fills(rows)
+    assert s.fill_times_by_token() == {"t": [5, 50, 60]}
+    assert s.fill_times_by_token(since=40) == {"t": [50, 60]}
+    assert s.fill_times_by_token(since=40, wallets=["0xA"]) == {"t": [50]}
