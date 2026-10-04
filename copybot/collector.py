@@ -276,7 +276,8 @@ class Collector:
                     log.info("resolutions: %d/%d batches, %d resolved", n, len(batches), resolved)
         return resolved
 
-    def fetch_prices(self, tokens: Iterable[str] | None = None) -> None:
+    def fetch_prices(self, tokens: Iterable[str] | None = None,
+                     workers: int = 8) -> None:
         """Finest available price history around each token's fills, used to
         replay delayed copies. The API caps a request at 15 days and keeps
         fine buckets only for recent data, so we try 60s, then 300s, then 1800s."""
@@ -285,24 +286,31 @@ class Collector:
         if tokens is not None:
             wanted = set(tokens)
             fill_ts = {t: v for t, v in fill_ts.items() if t in wanted}
-        for i, (token, times) in enumerate(fill_ts.items(), 1):
-            if self.store.has_prices(token):
-                continue
+        todo = [(t, v) for t, v in fill_ts.items() if not self.store.has_prices(t)]
+        apis = [DataApi(self.api.base_url) for _ in range(workers)]
+
+        def fetch(job: tuple[int, tuple[str, list[int]]]) -> tuple[str, list[tuple[int, float]]]:
+            n, (token, times) = job
+            api = apis[n % workers]
             pts: list[tuple[int, float]] = []
             for start, end in price_windows(times):
                 for bucket in buckets_for(start, now):
                     try:
-                        got = self.api.price_history(token, start=start, end=end,
-                                                     bucket_seconds=bucket)
+                        got = api.price_history(token, start=start, end=end,
+                                                bucket_seconds=bucket)
                     except Exception as exc:
                         log.warning("prices %s failed: %s", token, exc)
                         got = []
                     if got:
                         pts.extend(_price_point(p) for p in got)
                         break
-            self.store.add_prices(token, pts)
-            if i % 100 == 0:
-                log.info("prices: %d/%d tokens", i, len(fill_ts))
+            return token, pts
+
+        with ThreadPoolExecutor(workers) as pool:
+            for i, (token, pts) in enumerate(pool.map(fetch, enumerate(todo)), 1):
+                self.store.add_prices(token, pts)
+                if i % 100 == 0:
+                    log.info("prices: %d/%d tokens", i, len(todo))
 
 
 def _price_point(p: dict[str, Any]) -> tuple[int, float]:
