@@ -98,6 +98,35 @@ def cmd_collect(args, store: Store) -> None:
     print("collect done")
 
 
+def cmd_paper(args, store: Store) -> None:
+    from .clob import fetch_book
+    from .notify import from_env
+    from .paper import PaperConfig, PaperEngine, load_leaders
+
+    cfg = PaperConfig(mode=args.mode, bankroll=args.bankroll)
+    if args.action == "run":
+        wallets = watchlist(store, args.top, ScoringConfig(min_markets=args.min_markets))
+        leaders = load_leaders(store, wallets)
+    else:
+        leaders = {}
+    engine = PaperEngine(store, DataApi(), fetch_book, leaders, cfg, notifier=from_env())
+    if args.action == "run":
+        print(f"watching {len(leaders)} wallets in {args.mode} mode; Ctrl+C to stop")
+        try:
+            engine.run()
+        except KeyboardInterrupt:
+            print("stopped")
+    elif args.action == "status":
+        print(json.dumps(engine.status(), indent=2))
+    elif args.action in ("approve", "reject"):
+        if args.id is None:
+            raise SystemExit(f"usage: copybot paper {args.action} ID")
+        print(getattr(engine, args.action)(args.id))
+    elif args.action in ("pause", "resume"):
+        engine._set_meta("paused", "1" if args.action == "pause" else "0")
+        print(f"{args.action}d")
+
+
 def cmd_score(args, store: Store) -> None:
     cfg = ScoringConfig(min_markets=args.min_markets)
     fills, resolutions, series = _load(store)
@@ -175,6 +204,15 @@ def main(argv: list[str] | None = None) -> int:
     co.add_argument("--max-fills", type=int, default=20_000)
     co.add_argument("--min-markets", type=int, default=30)
 
+    pp = sub.add_parser("paper", help="paper trading: copy live trades with fake money")
+    pp.add_argument("action", choices=["run", "status", "approve", "reject", "pause", "resume"])
+    pp.add_argument("id", type=int, nargs="?", help="signal id for approve/reject")
+    pp.add_argument("--mode", choices=["auto", "approval"], default="auto")
+    pp.add_argument("--bankroll", type=float, default=1000.0)
+    pp.add_argument("--top", type=int, default=20,
+                    help="also watch this many pre-screened wallets (their trades always ask first)")
+    pp.add_argument("--min-markets", type=int, default=30)
+
     w = sub.add_parser("walkforward", help="out-of-sample go/no-go test")
     w.add_argument("--split", required=True, help="YYYY-MM-DD; select before, test after")
     w.add_argument("--top", type=int, default=20)
@@ -186,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     store = Store(args.db)
     try:
         {"discover": cmd_discover, "backfill": cmd_backfill, "score": cmd_score,
-         "report": cmd_report, "prices": cmd_prices, "collect": cmd_collect, "walkforward": cmd_walkforward}[args.cmd](args, store)
+         "report": cmd_report, "prices": cmd_prices, "collect": cmd_collect, "paper": cmd_paper, "walkforward": cmd_walkforward}[args.cmd](args, store)
     finally:
         store.close()
     return 0
