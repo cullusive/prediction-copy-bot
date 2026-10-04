@@ -27,3 +27,18 @@ Everything is stored in `copybot.db` (SQLite) in the current folder. The code us
 - The exact shape of `/v2/resolutions` items. `parse_resolution` accepts the likely shapes; check one real response.
 - The field names in `/v2/holders` and `/v2/prices-history` items.
 - Whether `/v2/activity?type=TRADE` returns maker fills as well as taker fills.
+
+## Paper trading (phase 2)
+
+`python -m copybot paper run` watches the eligible wallets (plus the top pre-screened ones) and copies their new trades with fake money. Fills are simulated against the live order book, so spreads, depth and our delay are all real. No orders are ever placed.
+
+Every leader buy gets a 0-100 score built from: the leader's backtested copy edge and sample size, the bet size relative to their usual size, whether other watched wallets agree or bet the other way, how far the price has moved since their fill, the spread and depth for our stake, and how expensive the entry is. Hard rules skip tiny trades, prices outside 5-90c, moves of more than 4c past the leader, and wide spreads. Red flags (an unproven leader, an unusually large bet from a short record, top wallets on the other side) never auto-execute.
+
+- `--mode auto` executes scores of 70 or more and asks for approval between 45 and 70.
+- `--mode approval` asks for everything that isn't skipped.
+- Approve or reject with `python -m copybot paper approve ID` / `reject ID`. Requests expire after 5 minutes.
+- When a leader sells, we sell the same fraction. Positions held to resolution settle automatically.
+- Risk limits: 2% of equity per trade ($5-30), 10% per market, 15% per leader, 60% total open, and trading pauses for the day after a 5% loss. `paper pause` / `paper resume` stop and start it by hand.
+- `python -m copybot paper status` shows equity, PnL, win rate and signal counts.
+
+Alerts go to Discord if `COPYBOT_DISCORD_WEBHOOK` is set to a channel webhook URL, and to the console otherwise. Keep the webhook URL out of the repo.
