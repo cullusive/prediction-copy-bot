@@ -34,11 +34,44 @@ def cmd_discover(args, store: Store) -> None:
 
 def cmd_backfill(args, store: Store) -> None:
     c = Collector(DataApi(), store)
-    c.backfill_all(max_fills=args.max_fills)
+    since = int(time.time()) - args.since_days * 86400 if args.since_days else None
+    c.backfill_all(max_fills=args.max_fills, max_wallets=args.max_wallets, since=since)
     print(f"resolved markets found: {c.refresh_resolutions()}")
     if not args.skip_prices:
         c.fetch_prices()
     print("backfill done")
+
+
+def prescreen(fills: dict, resolutions: dict, now: int, top: int,
+              cfg: ScoringConfig) -> list[str]:
+    """Wallets worth fetching prices for, ranked by their own (not copy) ROI.
+    Same filters as eligibility except the ones that need price history."""
+    skip = ("not enough price history", "copy edge gone")
+    ranked = []
+    for wallet, fs in fills.items():
+        m = score_wallet(wallet, fs, resolutions, lambda t, ts: None, now, cfg)
+        if not [r for r in m.reasons if not r.startswith(skip)] and m.roi > 0:
+            ranked.append((m.roi * m.n_markets / (m.n_markets + cfg.shrink_k), wallet))
+    ranked.sort(reverse=True)
+    return [w for _, w in ranked[:top]]
+
+
+def cmd_prices(args, store: Store) -> None:
+    """Fetch price history only for the most promising wallets' tokens."""
+    cfg = ScoringConfig(min_markets=args.min_markets)
+    fills = {w["address"]: [dict(r) for r in store.fills_for(w["address"])]
+             for w in store.wallets()}
+    resolutions = store.resolutions()
+    chosen = set(prescreen(fills, resolutions, int(time.time()), args.top, cfg))
+    if args.split:
+        split = int(datetime.fromisoformat(args.split).replace(tzinfo=timezone.utc).timestamp())
+        past = {w: [f for f in fs if f["ts"] < split] for w, fs in fills.items()}
+        chosen |= set(prescreen(past, {c: v for c, v in resolutions.items()
+                                       if v[1] is not None and v[1] < split},
+                                split, args.top, cfg))
+    tokens = {f["token_id"] for w in chosen for f in fills[w]}
+    print(f"fetching prices for {len(tokens)} tokens of {len(chosen)} wallets")
+    Collector(DataApi(), store).fetch_prices(tokens)
 
 
 def cmd_score(args, store: Store) -> None:
@@ -90,12 +123,21 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("backfill", help="download fills, resolutions and prices")
     b.add_argument("--max-fills", type=int, default=50_000)
     b.add_argument("--skip-prices", action="store_true")
+    b.add_argument("--max-wallets", type=int, default=None,
+                   help="backfill only this many candidates, multi-source first")
+    b.add_argument("--since-days", type=int, default=None,
+                   help="first fetch starts this many days ago instead of the beginning")
 
     for name, help_ in (("score", "score all wallets"), ("report", "show top wallets")):
         s = sub.add_parser(name, help=help_)
         s.add_argument("--top", type=int, default=30)
         s.add_argument("--all", action="store_true", help="include ineligible wallets")
         s.add_argument("--min-markets", type=int, default=30)
+
+    pr = sub.add_parser("prices", help="price history for the top pre-screened wallets")
+    pr.add_argument("--top", type=int, default=40)
+    pr.add_argument("--split", help="also pre-screen on data before this YYYY-MM-DD")
+    pr.add_argument("--min-markets", type=int, default=30)
 
     w = sub.add_parser("walkforward", help="out-of-sample go/no-go test")
     w.add_argument("--split", required=True, help="YYYY-MM-DD; select before, test after")
@@ -108,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     store = Store(args.db)
     try:
         {"discover": cmd_discover, "backfill": cmd_backfill, "score": cmd_score,
-         "report": cmd_report, "walkforward": cmd_walkforward}[args.cmd](args, store)
+         "report": cmd_report, "prices": cmd_prices, "walkforward": cmd_walkforward}[args.cmd](args, store)
     finally:
         store.close()
     return 0

@@ -86,8 +86,16 @@ class Store:
                 (",".join(sorted(sources)), name, address))
         self.conn.commit()
 
-    def wallets(self) -> list[sqlite3.Row]:
-        return self.conn.execute("SELECT * FROM wallets ORDER BY address").fetchall()
+    def wallets(self, limit: int | None = None) -> list[sqlite3.Row]:
+        """All candidates; with `limit`, the ones found by the most discovery
+        sources first (leaderboard + scan + winners beats scan alone)."""
+        if limit is None:
+            return self.conn.execute("SELECT * FROM wallets ORDER BY address").fetchall()
+        return self.conn.execute(
+            """SELECT * FROM wallets ORDER BY
+                 length(sources) - length(replace(sources, ',', '')) DESC,
+                 instr(sources, 'winners') > 0 DESC, address LIMIT ?""",
+            (limit,)).fetchall()
 
     def set_backfilled(self, address: str, ts: int) -> None:
         self.conn.execute("UPDATE wallets SET backfilled_to=? WHERE address=?",
@@ -119,10 +127,16 @@ class Store:
     def token_ids(self) -> list[str]:
         return [r[0] for r in self.conn.execute("SELECT DISTINCT token_id FROM fills")]
 
+    def fill_times_by_token(self) -> dict[str, list[int]]:
+        out: dict[str, list[int]] = {}
+        for tok, ts in self.conn.execute("SELECT token_id, ts FROM fills ORDER BY ts"):
+            out.setdefault(tok, []).append(ts)
+        return out
+
     # resolutions ---------------------------------------------------------
 
     def set_resolution(self, condition_id: str, payouts: list[float] | None,
-                       resolved_at: int | None, now: int) -> None:
+                       resolved_at: int | None, now: int, commit: bool = True) -> None:
         self.conn.execute(
             """INSERT INTO resolutions(condition_id, payouts, resolved_at, checked_at)
                VALUES (?,?,?,?)
@@ -131,7 +145,8 @@ class Store:
                  checked_at=excluded.checked_at""",
             (condition_id, json.dumps(payouts) if payouts is not None else None,
              resolved_at, now))
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def resolutions(self) -> dict[str, tuple[list[float], int | None]]:
         out = {}
