@@ -74,6 +74,30 @@ def cmd_prices(args, store: Store) -> None:
     Collector(DataApi(), store).fetch_prices(tokens)
 
 
+def watchlist(store: Store, top: int, cfg: ScoringConfig) -> list[str]:
+    """Wallets worth recording going forward: everyone currently eligible plus
+    the top pre-screened wallets by their own return."""
+    eligible = [r["wallet"] for r in store.top_scores(10_000)]
+    fills = {w["address"]: [dict(r) for r in store.fills_for(w["address"])]
+             for w in store.wallets()}
+    screened = prescreen(fills, store.resolutions(), int(time.time()), top, cfg)
+    return list(dict.fromkeys(eligible + screened))
+
+
+def cmd_collect(args, store: Store) -> None:
+    """Daily forward collection. Fine-grained price history expires after
+    about 9 days, so run this at least weekly (daily is safer)."""
+    cfg = ScoringConfig(min_markets=args.min_markets)
+    wallets = watchlist(store, args.top, cfg)
+    since = int(time.time()) - args.days * 86400
+    c = Collector(DataApi(), store)
+    print(f"collecting for {len(wallets)} wallets, fills since {args.days} days ago")
+    c.backfill_all(max_fills=args.max_fills, since=since, only=wallets)
+    print(f"resolved markets found: {c.refresh_resolutions()}")
+    c.fetch_prices(since=since, wallets=wallets)
+    print("collect done")
+
+
 def cmd_score(args, store: Store) -> None:
     cfg = ScoringConfig(min_markets=args.min_markets)
     fills, resolutions, series = _load(store)
@@ -105,7 +129,13 @@ def cmd_walkforward(args, store: Store) -> None:
     res = walk_forward(fills, resolutions, prices, split, args.top, cfg)
     print(f"picked {len(res.wallets)} wallets using data before {args.split}")
     print(f"copied {res.n_lots} of their later trades, ${res.cost:,.0f} of leader size")
-    print(f"copy return after delay + slippage: {res.copy_roi:.2%}")
+    print("copy return after delay + slippage:")
+    print(f"  same stake per trade (how the bot sizes): {res.fixed_stake_roi:.2%}")
+    print(f"  each wallet weighted equally:             {res.wallet_equal_roi:.2%}")
+    print(f"  at the leaders' own size:                 {res.copy_roi:.2%}")
+    for w in res.wallets:
+        wf = res.per_wallet[w]
+        print(f"  {w}  trades={wf.n_lots:5d}  stake={wf.mean_r:7.2%}  leader-size={wf.roi:7.2%}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -139,6 +169,12 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--split", help="also pre-screen on data before this YYYY-MM-DD")
     pr.add_argument("--min-markets", type=int, default=30)
 
+    co = sub.add_parser("collect", help="daily: new fills, resolutions and 60s prices for the watchlist")
+    co.add_argument("--top", type=int, default=50, help="pre-screened wallets to watch")
+    co.add_argument("--days", type=int, default=2, help="how far back to (re)collect")
+    co.add_argument("--max-fills", type=int, default=20_000)
+    co.add_argument("--min-markets", type=int, default=30)
+
     w = sub.add_parser("walkforward", help="out-of-sample go/no-go test")
     w.add_argument("--split", required=True, help="YYYY-MM-DD; select before, test after")
     w.add_argument("--top", type=int, default=20)
@@ -150,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     store = Store(args.db)
     try:
         {"discover": cmd_discover, "backfill": cmd_backfill, "score": cmd_score,
-         "report": cmd_report, "prices": cmd_prices, "walkforward": cmd_walkforward}[args.cmd](args, store)
+         "report": cmd_report, "prices": cmd_prices, "collect": cmd_collect, "walkforward": cmd_walkforward}[args.cmd](args, store)
     finally:
         store.close()
     return 0

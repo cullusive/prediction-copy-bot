@@ -234,16 +234,51 @@ def score_wallet(wallet: str, fills: Sequence[Mapping],
 
 
 @dataclass
+class WalletForward:
+    n_lots: int = 0
+    cost: float = 0.0          # leader dollars
+    pnl: float = 0.0           # copy PnL at leader size
+    sum_r: float = 0.0         # sum of per-trade copy returns
+
+    @property
+    def roi(self) -> float:
+        return self.pnl / self.cost if self.cost else 0.0
+
+    @property
+    def mean_r(self) -> float:
+        return self.sum_r / self.n_lots if self.n_lots else 0.0
+
+
+@dataclass
 class WalkForwardResult:
     split_ts: int
     wallets: list[str]
-    n_lots: int
-    cost: float
-    copy_pnl: float
+    per_wallet: dict[str, WalletForward] = field(default_factory=dict)
+
+    @property
+    def n_lots(self) -> int:
+        return sum(w.n_lots for w in self.per_wallet.values())
+
+    @property
+    def cost(self) -> float:
+        return sum(w.cost for w in self.per_wallet.values())
 
     @property
     def copy_roi(self) -> float:
-        return self.copy_pnl / self.cost if self.cost else 0.0
+        """Copying at the leader's own size. One whale can dominate this."""
+        return sum(w.pnl for w in self.per_wallet.values()) / self.cost if self.cost else 0.0
+
+    @property
+    def fixed_stake_roi(self) -> float:
+        """Same stake on every copied trade, which is how the bot sizes."""
+        n = self.n_lots
+        return sum(w.sum_r for w in self.per_wallet.values()) / n if n else 0.0
+
+    @property
+    def wallet_equal_roi(self) -> float:
+        """Average of each wallet's fixed-stake return, so no wallet dominates."""
+        ws = [w for w in self.per_wallet.values() if w.n_lots]
+        return sum(w.mean_r for w in ws) / len(ws) if ws else 0.0
 
 
 def walk_forward(fills_by_wallet: Mapping[str, Sequence[Mapping]],
@@ -264,20 +299,20 @@ def walk_forward(fills_by_wallet: Mapping[str, Sequence[Mapping]],
     ranked.sort(reverse=True)
     chosen = [w for _, w in ranked[:top_k]]
 
-    n = 0
-    cost = pnl = 0.0
+    result = WalkForwardResult(split_ts, chosen)
     for wallet in chosen:
-        lots = build_lots(fills_by_wallet[wallet], resolutions)
-        for l in lots:
+        wf = result.per_wallet.setdefault(wallet, WalletForward())
+        for l in build_lots(fills_by_wallet[wallet], resolutions):
             if l.entry_ts < split_ts or l.exit_price is None:
                 continue
             r = copy_return(l, cfg.primary_delay, prices, cfg)
             if r is None:
                 continue
-            n += 1
-            cost += l.cost
-            pnl += r * l.cost
-    return WalkForwardResult(split_ts, chosen, n, cost, pnl)
+            wf.n_lots += 1
+            wf.cost += l.cost
+            wf.pnl += r * l.cost
+            wf.sum_r += r
+    return result
 
 
 def _resolved_before(resolutions, ts):
